@@ -43,7 +43,8 @@ trait PatchAlgebras {
 
   def validatePatch[S, D](patchValue: JValue)(
       implicit S: Recursive.Aux[S, SchemaF],
-      D: Birecursive.Aux[D, GData]): CoalgebraM[ShortCircuitable, ListF[Step[S, D], ?], Traversal[S, D]] = {
+      D: Birecursive.Aux[D, GData]
+  ): CoalgebraM[ShortCircuitable, ListF[Step[S, D], ?], Traversal[S, D]] = {
     case (Nil, _, _) => NilF().right
     case (End :: Nil, schema, data) =>
       val validator = SchemaRules.fromSchemaToRules(schema)
@@ -60,8 +61,10 @@ trait PatchAlgebras {
       }.getOrElse(InvalidPath(path).left)
   }
 
-  def updateValue[S, D](implicit S: Recursive.Aux[S, SchemaF],
-                        D: Birecursive.Aux[D, GData]): AlgebraM[ShortCircuitable, ListF[Step[S, D], ?], D] = {
+  def updateValue[S, D](
+      implicit S: Recursive.Aux[S, SchemaF],
+      D: Birecursive.Aux[D, GData]
+  ): AlgebraM[ShortCircuitable, ListF[Step[S, D], ?], D] = {
     case NilF()                   => GBoolean[D](true).embed.right // hugly hack
     case ConsF(LastStep(data), _) => data.right
     case ConsF(InnerStep(position, schema, current), newData) =>
@@ -70,7 +73,8 @@ trait PatchAlgebras {
   }
 
   def doUpdate[D](position: Position, current: D, newData: D)(
-      implicit D: Birecursive.Aux[D, GData]): ShortCircuitable[D] =
+      implicit D: Birecursive.Aux[D, GData]
+  ): ShortCircuitable[D] =
     (position, current.project) match {
       case (Field(n), GStruct(fields)) =>
         GStruct(fields.map {
@@ -82,8 +86,10 @@ trait PatchAlgebras {
       case _ => InvalidPath(position :: Nil).left
     }
 
-  def applyPatch[S, D](schema: S, patch: JsonPatch, current: D)(implicit S: Recursive.Aux[S, SchemaF],
-                                                                D: Birecursive.Aux[D, GData]): EarlyResult \/ D =
+  def applyPatch[S, D](schema: S, patch: JsonPatch, current: D)(
+      implicit S: Recursive.Aux[S, SchemaF],
+      D: Birecursive.Aux[D, GData]
+  ): EarlyResult \/ D =
     (patch.path, schema, current)
       .hyloM[ShortCircuitable, ListF[Step[S, D], ?], D](updateValue, validatePatch(patch.value))
 }

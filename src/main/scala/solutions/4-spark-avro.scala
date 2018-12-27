@@ -136,9 +136,10 @@ object AvroConverter extends SchemaToAvroAlgebras with GDataInstances {
     }
   }
 
-  def fromGDataToAvro[S, D](schema: S, data: D)(
-      implicit S: Birecursive.Aux[S, SchemaF],
-      D: Birecursive.Aux[D, GData]): \/[Incompatibility[D], GenericContainer] = {
+  def fromGDataToAvro[S, D](
+      schema: S,
+      data: D
+  )(implicit S: Birecursive.Aux[S, SchemaF], D: Birecursive.Aux[D, GData]): \/[Incompatibility[D], GenericContainer] = {
 
     val zipWithSchemaAlg: CoalgebraM[\/[Incompatibility[D], ?], DataWithSchema, (S, D)] = {
       case (sch, dat) =>
@@ -146,7 +147,8 @@ object AvroConverter extends SchemaToAvroAlgebras with GDataInstances {
 
           case (structF @ StructF(fieldsSchema), GStruct(fields)) =>
             val withSchema = GStruct(
-              ListMap(fields.map { case (name, fx) => (name, (fieldsSchema(name), fx)) }.toSeq: _*))
+              ListMap(fields.map { case (name, fx) => (name, (fieldsSchema(name), fx)) }.toSeq: _*)
+            )
             EnvT[Schema, GData, (S, D)]((schemaFToAvro(structF.embed), withSchema)).right
 
           case (arrF @ ArrayF(fieldSchema), GArray(elems)) =>
@@ -214,8 +216,9 @@ trait GDataInstances {
 
   implicit val genericDataFTraverse: Traverse[GData] = new Traverse[GData] {
 
-    override def traverseImpl[G[_], A, B](fa: GData[A])(f: A => G[B])(
-        implicit evidence$1: Applicative[G]): G[GData[B]] = fa match {
+    override def traverseImpl[G[_], A, B](
+        fa: GData[A]
+    )(f: A => G[B])(implicit evidence$1: Applicative[G]): G[GData[B]] = fa match {
       case GArray(elems) =>
         Functor[G].map(elems.toList traverse f)(GArray.apply)
 

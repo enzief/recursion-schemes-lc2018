@@ -1,10 +1,10 @@
 
-val kindProjector = "org.spire-math" %% "kind-projector" % "0.9.7"
+val kindProjector = "org.spire-math" %% "kind-projector" % "0.9.9"
 
-scalaVersion in ThisBuild := "2.12.4"
+scalaVersion in ThisBuild := "2.12.8"
 
 lazy val matryoshkaVersion = "0.21.3"
-lazy val validationVersion = "2.1.0"
+lazy val validationVersion = "2.1.3"
 
 resolvers ++= Seq(
   Resolver.sonatypeRepo("snapshots"),

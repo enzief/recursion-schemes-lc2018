@@ -40,8 +40,9 @@ object SchemaRules {
     override def ap[A, B](fa: => JRule[A])(f: => JRule[A => B]): JRule[B] = fa.ap(f)
   }
 
-  def fromSchemaToRules[S, D](schema: S)(implicit S: Recursive.Aux[S, SchemaF],
-                                         D: Corecursive.Aux[D, GData]): JRule[D] = {
+  def fromSchemaToRules[S, D](
+      schema: S
+  )(implicit S: Recursive.Aux[S, SchemaF], D: Corecursive.Aux[D, GData]): JRule[D] = {
     val alg: Algebra[SchemaF, JRule[D]] = {
       case StructF(fields) =>
         fields.toList
@@ -133,7 +134,7 @@ trait DataWithSchemaGenerator {
                  FloatF[S]().embed,
                  IntegerF[S]().embed,
                  LongF[S]().embed,
-                 StringF[S]().embed,
+                 StringF[S]().embed
                )
     } yield (name, valueF)
 

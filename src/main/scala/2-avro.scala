@@ -43,7 +43,7 @@ trait Labelling {
     * Here is the "special trick" of the current solution.
     *
     * EnvT is a kind of "glorified pair". Given a label type E and a (pattern)-functor F, it allows us
-    * to label each "node" of a T[F] with a value of type E while retaining the original structure. In
+    * to label each "node" of a F[T] with a value of type E while retaining the original structure. In
     * other words, if F is a functor, then EnvT[E, F, ?] is a functor as well.
     */
   type Labelled[A] = EnvT[Path, SchemaF, A]
@@ -55,9 +55,9 @@ trait Labelling {
     * follow the types together.
     *
     * A Coalgebra[F, A] is just a function A => F[A]. So the coalgebra bellow is just a function
-    *  (Path, T[SchemaF]) => Labelled[(Path, T[SchemaF])
+    *  (Path, SchemaF[T]) => Labelled[(Path, SchemaF[T])
     * Expanding the Labelled alias it becomes
-    *  (Path, T[SchemaF]) => EnvT[Path, SchemaF, (Path, T[SchemaF])]
+    *  (Path, SchemaF[T]) => EnvT[Path, SchemaF, (Path, SchemaF[T])]
     *
     * Ok, maybe it still looks a bit scarry...
     *
@@ -67,7 +67,18 @@ trait Labelling {
     * but modified such that its "content" is not just a "smaller schema" as it was initially, but a new "seed"
     * consisting of a (larger) path, and the said "smaller schema".
     */
-  def labelNodesWithPath[T](implicit T: Recursive.Aux[T, SchemaF]): Coalgebra[Labelled, (Path, T)] = TODO
+  def labelNodesWithPath[T](implicit T: Recursive.Aux[T, SchemaF]): Coalgebra[Labelled, (Path, T)] = {
+    case (path, t) =>
+      t.project match {
+        case StructF(fields) =>
+          EnvT {
+            path -> StructF(fields.map { case (k, v) => k -> (k :: path, v) })
+          }
+
+        case sch =>
+          EnvT(path -> sch.map(path -> _))
+      }
+  }
 
   /**
     * Now the algebra (that we had no way to write before) becomes trivial. All we have to do is to use
@@ -76,7 +87,26 @@ trait Labelling {
     * To extract the label (resp. node) of an EnvT you can use pattern-matching (EnvT contains only a pair
     * (label, node)), or you can use the `ask` and `lower` methods that return the label and node respectively.
     */
-  def labelledToSchema: Algebra[Labelled, Schema] = TODO
+  def labelledToSchema: Algebra[Labelled, Schema] =
+    (envT: Labelled[Schema]) =>
+      envT.lower match {
+        case StructF(fields) =>
+          val path: List[String] = envT.ask
+          fields
+            .foldLeft(SchemaBuilder.record(path.mkString("a", ".", "z")).fields) {
+              case (builder, (key, value)) =>
+                builder.name(key).`type`(value).noDefault()
+            }
+            .endRecord()
+        case ArrayF(element) => SchemaBuilder.array().items(element)
+        case BooleanF()      => Schema.create(Schema.Type.BOOLEAN)
+        case DateF()         => LogicalTypes.timestampMillis().addToSchema(Schema.create(Schema.Type.LONG))
+        case DoubleF()       => Schema.create(Schema.Type.DOUBLE)
+        case FloatF()        => Schema.create(Schema.Type.FLOAT)
+        case IntegerF()      => Schema.create(Schema.Type.INT)
+        case LongF()         => Schema.create(Schema.Type.LONG)
+        case StringF()       => Schema.create(Schema.Type.STRING)
+      }
 
   def schemaFToAvro[T](schemaF: T)(implicit T: Recursive.Aux[T, SchemaF]): Schema =
     (List.empty[String], schemaF).hylo(labelledToSchema, labelNodesWithPath)
@@ -102,9 +132,57 @@ trait UsingARegistry {
 
   def fingerprint(fields: Map[String, Schema]): Int = fields.hashCode
 
-  def useARegistry: AlgebraM[Registry, SchemaF, Schema] = TODO
+  def useARegistry: AlgebraM[Registry, SchemaF, Schema] = {
+    case StructF(fields) =>
+      val idx: Int = fingerprint(fields)
+      State { rgt: Map[Int, Schema] =>
+        rgt
+          .get(idx)
+          .map(rgt -> _)
+          .getOrElse {
+            val record = fields
+              .foldLeft(SchemaBuilder.record("r%x".format(idx)).fields) {
+                case (builder, (key, value)) =>
+                  builder.name(key).`type`(value).noDefault()
+              }
+              .endRecord()
+            (rgt + (idx -> record)) -> record
+          }
+      }
+    case ArrayF(element) =>
+      SchemaBuilder.array().items(element) |> State.state
+    case BooleanF() =>
+      Schema.create(Schema.Type.BOOLEAN) |> State.state
+    case DateF() =>
+      LogicalTypes.timestampMillis().addToSchema(Schema.create(Schema.Type.LONG)) |> State.state
+    case DoubleF()  => Schema.create(Schema.Type.DOUBLE) |> State.state
+    case FloatF()   => Schema.create(Schema.Type.FLOAT) |> State.state
+    case IntegerF() => Schema.create(Schema.Type.INT) |> State.state
+    case LongF()    => Schema.create(Schema.Type.LONG) |> State.state
+    case StringF()  => Schema.create(Schema.Type.STRING) |> State.state
+  }
 
-  implicit def schemaFTraverse: Traverse[SchemaF] = TODO
+  implicit def schemaFTraverse: Traverse[SchemaF] = new Traverse[SchemaF] {
+    def traverseImpl[G[_], A, B](fa: SchemaF[A])(f: A => G[B])(implicit G: Applicative[G]): G[SchemaF[B]] =
+      fa match {
+        case StructF(fields) =>
+          fields.toList
+            .traverse {
+              case (k, v) => f(v).map(k -> _)
+            }
+            .map { ls =>
+              ListMap(ls: _*) |> StructF.apply
+            }
+        case ArrayF(elem) => f(elem).map(ArrayF.apply)
+        case BooleanF()   => G.point(BooleanF())
+        case DateF()      => G.point(DateF())
+        case DoubleF()    => G.point(DoubleF())
+        case FloatF()     => G.point(FloatF())
+        case IntegerF()   => G.point(IntegerF())
+        case LongF()      => G.point(LongF())
+        case StringF()    => G.point(StringF())
+      }
+  }
 
   def toAvro[T](schemaF: T)(implicit T: Recursive.Aux[T, SchemaF]): Schema =
     schemaF.cataM(useARegistry).run(Map.empty)._2
@@ -118,5 +196,29 @@ trait AvroCoalgebra {
     * we need a CoalgebraM, but we're not really interested in providing meaningful errors
     * here, so we can use Option as our monad.
     */
-  def avroToSchemaF: CoalgebraM[Option, SchemaF, Schema] = TODO
+  def avroToSchemaF: CoalgebraM[Option, SchemaF, Schema] = { schema =>
+    schema.getType match {
+      case Schema.Type.RECORD =>
+        schema.getFields.asScala.map(f => f.name -> f.schema) |> { ls =>
+          StructF(ListMap(ls: _*)).some
+        }
+      case Schema.Type.ARRAY   => ArrayF(schema.getElementType).some
+      case Schema.Type.BOOLEAN => BooleanF().some
+      case Schema.Type.DOUBLE  => DoubleF().some
+      case Schema.Type.FLOAT   => FloatF().some
+      case Schema.Type.INT     => IntegerF().some
+      case Schema.Type.LONG =>
+        Option(schema.getLogicalType)
+          .map[Option[SchemaF[Schema]]] {
+            Option(_)
+              .filter(_.getName == LogicalTypes.timestampMillis().getName)
+              .as(DateF())
+          }
+          .getOrElse {
+            LongF().some
+          }
+      case Schema.Type.STRING => StringF().some
+      case _                  => None
+    }
+  }
 }

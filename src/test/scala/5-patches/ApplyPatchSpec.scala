@@ -23,9 +23,11 @@ class ApplyPatchSpec extends FlatSpec with Matchers with PatchAlgebras {
         ListMap(
           "bar" -> IntegerF[Fix[SchemaF]]().embed,
           "baz" -> BooleanF[Fix[SchemaF]]().embed
-        )).embed,
+        )
+      ).embed,
       "qux" -> StringF[Fix[SchemaF]]().embed
-    )).embed
+    )
+  ).embed
 
   val initialData: Fix[GData] = GStruct(
     ListMap(
@@ -33,9 +35,11 @@ class ApplyPatchSpec extends FlatSpec with Matchers with PatchAlgebras {
         ListMap(
           "bar" -> GInteger[Fix[GData]](1).embed,
           "baz" -> GBoolean[Fix[GData]](true).embed
-        )).embed,
+        )
+      ).embed,
       "qux" -> GString[Fix[GData]]("hoay!").embed
-    )).embed
+    )
+  ).embed
 
   val expected = GStruct(
     ListMap(
@@ -43,9 +47,11 @@ class ApplyPatchSpec extends FlatSpec with Matchers with PatchAlgebras {
         ListMap(
           "bar" -> GInteger[Fix[GData]](42).embed,
           "baz" -> GBoolean[Fix[GData]](true).embed
-        )).embed,
+        )
+      ).embed,
       "qux" -> GString[Fix[GData]]("hoay!").embed
-    )).embed
+    )
+  ).embed
   "Applying a patch" should "update the relevant fields" in {
     applyPatch(schema, patch, initialData) should be(\/-(expected))
   }

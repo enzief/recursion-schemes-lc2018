@@ -6,16 +6,20 @@ import org.scalacheck.{Arbitrary, Gen}
 import matryoshka._, implicits._
 
 trait ArbitraryPatch extends GDataInstances with SchemaToAvroAlgebras with DataWithSchemaGenerator {
-  def patchForData[S, D](schema: S, data: D)(implicit S: Recursive.Aux[S, SchemaF],
-                                             D: Birecursive.Aux[D, GData]): Gen[JsonPatch] =
+  def patchForData[S, D](
+      schema: S,
+      data: D
+  )(implicit S: Recursive.Aux[S, SchemaF], D: Birecursive.Aux[D, GData]): Gen[JsonPatch] =
     for {
       depth       <- Gen.choose(1, 10)
       (path, sch) <- pathInData(depth, schema, data)
       patchValue  <- sch cata schemaToDataGen
     } yield JsonPatch(Replace, path, toJson(patchValue))
 
-  def pathInData[S, D](depth: Int, schema: S, data: D)(implicit S: Recursive.Aux[S, SchemaF],
-                                                       D: Recursive.Aux[D, GData]): Gen[(List[Position], S)] =
+  def pathInData[S, D](depth: Int, schema: S, data: D)(
+      implicit S: Recursive.Aux[S, SchemaF],
+      D: Recursive.Aux[D, GData]
+  ): Gen[(List[Position], S)] =
     if (depth == 0) Gen.const((End :: Nil, schema))
     else {
       (schema.project, data.project) match {
@@ -34,8 +38,10 @@ trait ArbitraryPatch extends GDataInstances with SchemaToAvroAlgebras with DataW
       }
     }
 
-  implicit def dataAndTwoPatches[S, D](implicit S: Birecursive.Aux[S, SchemaF],
-                                       D: Birecursive.Aux[D, GData]): Arbitrary[(S, D, JsonPatch, JsonPatch)] =
+  implicit def dataAndTwoPatches[S, D](
+      implicit S: Birecursive.Aux[S, SchemaF],
+      D: Birecursive.Aux[D, GData]
+  ): Arbitrary[(S, D, JsonPatch, JsonPatch)] =
     Arbitrary {
       for {
         (s, data) <- genSchemaAndData[S, D]

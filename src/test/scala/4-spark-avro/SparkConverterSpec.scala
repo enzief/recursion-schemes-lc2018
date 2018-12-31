@@ -36,7 +36,9 @@ class SparkConverterTest extends FlatSpec with Matchers {
         ListMap(
           "a" -> Fix(GString("toto")),
           "b" -> Fix(GStruct(ListMap("c" -> Fix(GInteger(12)))))
-        )))
+        )
+      )
+    )
     val row = fromGDataToSparkRow(data)
     row should be(Row("toto", Row(12)))
   }

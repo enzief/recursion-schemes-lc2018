@@ -26,7 +26,20 @@ object SchemaF extends SchemaFToDataTypeAlgebras with SchemaFArbitrary {
   /**
     * As usual, we need to define a Functor instance for our pattern.
     */
-  implicit val schemaFScalazFunctor: Functor[SchemaF] = TODO
+  implicit val schemaFScalazFunctor: Functor[SchemaF] =
+    new Functor[SchemaF] {
+      def map[A, B](fa: SchemaF[A])(f: A => B): SchemaF[B] = fa match {
+        case StructF(fields) => StructF(fields.map { case (name, value) => name -> f(value) })
+        case ArrayF(elem)    => ArrayF(f(elem))
+        case BooleanF()      => BooleanF()
+        case DateF()         => DateF()
+        case DoubleF()       => DoubleF()
+        case FloatF()        => FloatF()
+        case IntegerF()      => IntegerF()
+        case LongF()         => LongF()
+        case StringF()       => StringF()
+      }
+    }
 
   /**
     * It might be usefull to have a nice string representation of our schemas.
@@ -46,11 +59,25 @@ object SchemaF extends SchemaFToDataTypeAlgebras with SchemaFArbitrary {
     *
     */
   implicit val schemaFDelayShow: Delay[Show, SchemaF] = new Delay[Show, SchemaF] {
-    def apply[A](showA: Show[A]): Show[SchemaF[A]] = new Show[SchemaF[A]] {
-      override def show(schema: SchemaF[A]): Cord = TODO
-    }
-  }
 
+    def apply[A](showA: Show[A]): Show[SchemaF[A]] =
+      new Show[SchemaF[A]] {
+        override def show(schema: SchemaF[A]): Cord =
+          schema match {
+            case StructF(fields) =>
+              val showFields = fields.map { case (k, v) => Cord(k) ++ Cord(": ") ++ showA.show(v) }.toSeq
+              Cord("{ ") ++ Cord.mkCord(Cord(", "), showFields: _*) ++ Cord(" }")
+            case ArrayF(element) => Cord("[ ") ++ showA.show(element) ++ Cord(" ]")
+            case BooleanF()      => Cord("boolean")
+            case DateF()         => Cord("date")
+            case DoubleF()       => Cord("double")
+            case FloatF()        => Cord("float")
+            case IntegerF()      => Cord("integer")
+            case LongF()         => Cord("long")
+            case StringF()       => Cord("string")
+          }
+      }
+  }
 }
 
 /**
@@ -73,12 +100,32 @@ trait SchemaFToDataTypeAlgebras {
   /**
     * As usual, simply a function from SchemaF[DataType] to DataType
     */
-  def schemaFToDataType: Algebra[SchemaF, DataType] = TODO
+  def schemaFToDataType: Algebra[SchemaF, DataType] = {
+    case StructF(fields) => StructType(fields.map { case (name, value) => StructField(name, value) }.toArray)
+    case ArrayF(elem)    => ArrayType(elem, containsNull = false)
+    case BooleanF()      => BooleanType
+    case DateF()         => DateType
+    case DoubleF()       => DoubleType
+    case FloatF()        => FloatType
+    case IntegerF()      => IntegerType
+    case LongF()         => LongType
+    case StringF()       => StringType
+  }
 
   /**
     * And the other way around, a function from DataType to SchemaF[DataType]
     */
-  def dataTypeToSchemaF: Coalgebra[SchemaF, DataType] = TODO
+  def dataTypeToSchemaF: Coalgebra[SchemaF, DataType] = {
+    case StructType(fields) => StructF(ListMap(fields.map(f => f.name -> f.dataType): _*))
+    case ArrayType(elem, _) => ArrayF(elem)
+    case BooleanType        => BooleanF()
+    case DateType           => DateF()
+    case DoubleType         => DoubleF()
+    case FloatType          => FloatF()
+    case IntegerType        => IntegerF()
+    case LongType           => LongF()
+    case StringType         => StringF()
+  }
 
   /**
     * This pair of (co)algebras allows us to create a Birecursive[DataType, SchemaF] instance "for free".
@@ -144,7 +191,24 @@ trait SchemaFArbitrary {
 
   implicit def schemaFDelayArbitrary: Delay[Arbitrary, SchemaF] = new Delay[Arbitrary, SchemaF] {
 
-    def apply[A](A: Arbitrary[A]): Arbitrary[SchemaF[A]] = TODO
-
+    def apply[A](A: Arbitrary[A]): Arbitrary[SchemaF[A]] =
+      Arbitrary(
+        Gen.oneOf(
+          Gen.const(BooleanF[A]()),
+          Gen.const(DateF[A]()),
+          Gen.const(DoubleF[A]()),
+          Gen.const(FloatF[A]()),
+          Gen.const(IntegerF[A]()),
+          Gen.const(LongF[A]()),
+          Gen.const(StringF[A]()),
+          for {
+            nbFields <- Gen.choose(1, 10)
+            // we need to make sure that fields' names are unique and non empty
+            names <- Gen.listOfN(nbFields, Gen.alphaStr).map(_.map("a" ++ _).toSet)
+            types <- Gen.listOfN(names.size, A.arbitrary)
+          } yield StructF[A](ListMap((names.toList zip types): _*)),
+          A.arbitrary.map(ArrayF.apply _)
+        )
+      )
   }
 }

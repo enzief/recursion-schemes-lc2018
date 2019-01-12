@@ -55,9 +55,9 @@ trait Labelling {
     * follow the types together.
     *
     * A Coalgebra[F, A] is just a function A => F[A]. So the coalgebra bellow is just a function
-    *  (Path, T[SchemaF]) => Labelled[(Path, T[SchemaF])
+    *  (Path, T) => Labelled[(Path, T)]
     * Expanding the Labelled alias it becomes
-    *  (Path, T[SchemaF]) => EnvT[Path, SchemaF, (Path, T[SchemaF])]
+    *  (Path, T) => EnvT[Path, SchemaF, (Path, T)]
     *
     * Ok, maybe it still looks a bit scarry...
     *
@@ -67,7 +67,17 @@ trait Labelling {
     * but modified such that its "content" is not just a "smaller schema" as it was initially, but a new "seed"
     * consisting of a (larger) path, and the said "smaller schema".
     */
-  def labelNodesWithPath[T](implicit T: Recursive.Aux[T, SchemaF]): Coalgebra[Labelled, (Path, T)] = TODO
+  def labelNodesWithPath[T](implicit T: Recursive.Aux[T, SchemaF]): Coalgebra[Labelled, (Path, T)] = {
+    case (path, t) =>
+      EnvT(path -> {
+        T.project(t) match {
+          case StructF(fields) =>
+            StructF(fields.map { case (name, t) => name -> (name :: path, t) })
+          case schemaF =>
+            schemaF.map(path -> _)
+        }
+      })
+  }
 
   /**
     * Now the algebra (that we had no way to write before) becomes trivial. All we have to do is to use
@@ -76,7 +86,27 @@ trait Labelling {
     * To extract the label (resp. node) of an EnvT you can use pattern-matching (EnvT contains only a pair
     * (label, node)), or you can use the `ask` and `lower` methods that return the label and node respectively.
     */
-  def labelledToSchema: Algebra[Labelled, Schema] = TODO
+  // EnvT[Path, SchemaF, Schema] => Schema
+  def labelledToSchema: Algebra[Labelled, Schema] = {
+    case EnvT((path, schemaF)) =>
+      schemaF match {
+        case ArrayF(elem) => SchemaBuilder.array().items(elem)
+        case BooleanF()   => Schema.create(Schema.Type.BOOLEAN)
+        case DateF()      => LogicalTypes.timestampMillis().addToSchema(Schema.create(Schema.Type.LONG))
+        case DoubleF()    => Schema.create(Schema.Type.DOUBLE)
+        case FloatF()     => Schema.create(Schema.Type.FLOAT)
+        case IntegerF()   => Schema.create(Schema.Type.INT)
+        case LongF()      => Schema.create(Schema.Type.LONG)
+        case StringF()    => Schema.create(Schema.Type.STRING)
+        case StructF(fields) =>
+          fields
+            .foldLeft(SchemaBuilder.record(path.mkString("a", ".", "z")).fields) {
+              case (builder, (key, value)) =>
+                builder.name(key).`type`(value).noDefault()
+            }
+            .endRecord()
+      }
+  }
 
   def schemaFToAvro[T](schemaF: T)(implicit T: Recursive.Aux[T, SchemaF]): Schema =
     (List.empty[String], schemaF).hylo(labelledToSchema, labelNodesWithPath)

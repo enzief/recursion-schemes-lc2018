@@ -132,9 +132,53 @@ trait UsingARegistry {
 
   def fingerprint(fields: Map[String, Schema]): Int = fields.hashCode
 
-  def useARegistry: AlgebraM[Registry, SchemaF, Schema] = TODO
+  // SchemaF[Schema] => Registry[Schema]
+  def useARegistry: AlgebraM[Registry, SchemaF, Schema] = {
+    case ArrayF(e)  => State.state(SchemaBuilder.array().items(e))
+    case BooleanF() => State.state(Schema.create(Schema.Type.BOOLEAN))
+    case DateF()    => State.state(LogicalTypes.timestampMillis().addToSchema(Schema.create(Schema.Type.LONG)))
+    case DoubleF()  => State.state(Schema.create(Schema.Type.DOUBLE))
+    case FloatF()   => State.state(Schema.create(Schema.Type.FLOAT))
+    case IntegerF() => State.state(Schema.create(Schema.Type.INT))
+    case LongF()    => State.state(Schema.create(Schema.Type.LONG))
+    case StringF()  => State.state(Schema.create(Schema.Type.STRING))
+    case StructF(fields) =>
+      val fp = fingerprint(fields)
+      State { (reg: Map[Int, Schema]) =>
+        val records = fields
+          .foldLeft(SchemaBuilder.record("r%x".format(fp)).fields) {
+            case (builder, (key, value)) =>
+              builder.name(key).`type`(value).noDefault()
+          }
+          .endRecord()
+        reg + (fp -> records) -> records
+      }
+  }
 
-  implicit def schemaFTraverse: Traverse[SchemaF] = TODO
+  implicit def schemaFTraverse: Traverse[SchemaF] =
+    new Traverse[SchemaF] {
+      override def traverseImpl[G[_], A, B](
+          fa: SchemaF[A]
+      )(
+          f: A => G[B]
+      )(
+          implicit G: Applicative[G]
+      ): G[SchemaF[B]] =
+        fa match {
+          case ArrayF(elem) => f(elem).map(ArrayF(_))
+          case BooleanF()   => G.point(BooleanF[B]())
+          case DateF()      => G.point(DateF[B]())
+          case DoubleF()    => G.point(DoubleF[B]())
+          case FloatF()     => G.point(FloatF[B]())
+          case IntegerF()   => G.point(IntegerF[B]())
+          case LongF()      => G.point(LongF[B]())
+          case StringF()    => G.point(StringF[B]())
+          case StructF(fields) =>
+            fields.toList
+              .traverse(_.traverse(f))
+              .map(ListMap(_: _*) |> StructF.apply)
+        }
+    }
 
   def toAvro[T](schemaF: T)(implicit T: Recursive.Aux[T, SchemaF]): Schema =
     schemaF.cataM(useARegistry).run(Map.empty)._2
@@ -148,5 +192,29 @@ trait AvroCoalgebra {
     * we need a CoalgebraM, but we're not really interested in providing meaningful errors
     * here, so we can use Option as our monad.
     */
-  def avroToSchemaF: CoalgebraM[Option, SchemaF, Schema] = TODO
+  // Schema => Option[SchemaF[Schema]]
+  def avroToSchemaF: CoalgebraM[Option, SchemaF, Schema] = { schema =>
+    schema.getType match {
+      case Schema.Type.ARRAY   => ArrayF(schema.getElementType).some
+      case Schema.Type.BOOLEAN => BooleanF().some
+      case Schema.Type.DOUBLE  => DoubleF().some
+      case Schema.Type.FLOAT   => FloatF().some
+      case Schema.Type.INT     => IntegerF().some
+      case Schema.Type.STRING  => StringF().some
+
+      case Schema.Type.LONG =>
+        Option(schema.getLogicalType)
+          .flatMap[SchemaF[Schema]] { lt =>
+            DateF().some.filter(_ => lt.getName == LogicalTypes.timestampMillis().getName)
+          }
+          .orElse(LongF().some)
+
+      case Schema.Type.RECORD =>
+        val fields: collection.mutable.Buffer[(String, Schema)] =
+          schema.getFields.asScala.map(f => f.name -> f.schema)
+        StructF(ListMap(fields: _*)).some
+
+      case _ => None
+    }
+  }
 }

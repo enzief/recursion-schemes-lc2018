@@ -19,24 +19,15 @@ import scala.language.higherKinds
   * For that we'll use the JTO Validation library but first we need to define what a "Data" is
   */
 sealed trait GData[A]
-
 final case class GStruct[A](fields: ListMap[String, A]) extends GData[A]
-
-final case class GArray[A](element: Seq[A]) extends GData[A]
-
-final case class GBoolean[A](value: Boolean) extends GData[A]
-
-final case class GDate[A](value: java.util.Date) extends GData[A]
-
-final case class GDouble[A](value: Double) extends GData[A]
-
-final case class GFloat[A](value: Float) extends GData[A]
-
-final case class GInteger[A](value: Int) extends GData[A]
-
-final case class GLong[A](value: Long) extends GData[A]
-
-final case class GString[A](value: String) extends GData[A]
+final case class GArray[A](element: Seq[A])             extends GData[A]
+final case class GBoolean[A](value: Boolean)            extends GData[A]
+final case class GDate[A](value: java.util.Date)        extends GData[A]
+final case class GDouble[A](value: Double)              extends GData[A]
+final case class GFloat[A](value: Float)                extends GData[A]
+final case class GInteger[A](value: Int)                extends GData[A]
+final case class GLong[A](value: Long)                  extends GData[A]
+final case class GString[A](value: String)              extends GData[A]
 
 object GData extends GDataInstances with DataWithSchemaGenerator
 
@@ -52,6 +43,12 @@ object SchemaRules {
     */
   type JRule[A] = Rule[JValue, A]
 
+  implicit val jruleA: Applicative[JRule] = new Applicative[JRule] {
+    override def point[A](a: => A): JRule[A] = Rule.pure(a)
+
+    override def ap[A, B](fa: => JRule[A])(f: => JRule[A => B]): JRule[B] = fa.ap(f)
+  }
+
   /**
     * One important thing is that going through a struct
     * means going through its fields one-by-one and generate `Rules`
@@ -59,8 +56,27 @@ object SchemaRules {
     *
     * The best way will be to `traverse` the fields (there is an Applicative instance for JRule)
     */
-  def fromSchemaToRules[T](schema: T)(implicit T: Recursive.Aux[T, SchemaF]): JRule[Fix[GData]] = TODO
+  def fromSchemaToRules[T](schema: T)(implicit T: Recursive.Aux[T, SchemaF]): JRule[Fix[GData]] =
+    T.cata(schema)(schemaFToRule)
 
+  // SchemaF[JRule[Fix[GData]]] => JRule[Fix[GData]]
+  val schemaFToRule: Algebra[SchemaF, JRule[Fix[GData]]] = {
+    case ArrayF(elem) => Rules.pickSeq(elem).map(elems => Fix(GArray(elems)))
+    case BooleanF()   => Rules.booleanR.map(x => Fix(GBoolean(x)))
+    case DateF()      => Rules.stringR.andThen(Rules.isoDateR).map(x => Fix(GDate(x)))
+    case DoubleF()    => Rules.doubleR.map(x => Fix(GDouble(x)))
+    case FloatF()     => Rules.floatR.map(x => Fix(GFloat(x)))
+    case IntegerF()   => Rules.intR.map(x => Fix(GInteger(x)))
+    case LongF()      => Rules.longR.map(x => Fix(GLong(x)))
+    case StringF()    => Rules.stringR.map(x => Fix(GString(x)))
+    case StructF(fields) =>
+      fields.toList
+        .traverse[JRule, (String, Fix[GData])] {
+          case (name, validation) =>
+            (Path \ name).read(_ => validation.map(name -> _))
+        }
+        .map(x => Fix(GStruct[Fix[GData]](ListMap(x: _*))))
+  }
 }
 
 /**

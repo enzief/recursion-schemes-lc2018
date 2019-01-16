@@ -98,5 +98,115 @@ trait DataWithSchemaGenerator {
   // Bonus : handle number of fields
   // Bonus : handle max depth to "finish somewhere"
   // And don't forget the master defining what to generate is the schema
-  def genSchemaAndData[S, D](implicit S: Birecursive.Aux[S, SchemaF], D: Corecursive.Aux[D, GData]): Gen[(S, D)] = TODO
+  def genSchemaAndData[S, D](
+      implicit
+      S: Birecursive.Aux[S, SchemaF],
+      D: Corecursive.Aux[D, GData]
+  ): Gen[(S, D)] =
+    for {
+      s <- genSchemaF
+      d <- S.cata(s)(schemaFToDataGen)
+    } yield s -> d
+
+  implicit val genA: Applicative[Gen] = new Applicative[Gen] {
+    override def point[A](a: => A): Gen[A] = Gen.const(a)
+
+    override def ap[A, B](fa: => Gen[A])(ff: => Gen[A => B]): Gen[B] =
+      for {
+        a <- fa
+        f <- ff
+      } yield f(a)
+  }
+
+  def schemaFToDataGen[D](implicit D: Corecursive.Aux[D, GData]): Algebra[SchemaF, Gen[D]] = {
+    case ArrayF(elems) =>
+      Gen.listOf(elems).map(lst => D.embed(GArray(lst)))
+
+    case StructF(fields) =>
+      fields.toList
+        .traverse {
+          case (k, v) => v.map(k -> _)
+        }
+        .map { flds =>
+          D.embed(GStruct(ListMap(flds: _*)))
+        }
+
+    case BooleanF() =>
+      Gen.oneOf(true, false).map(value => D.embed(GBoolean[D](value)))
+
+    case DateF() =>
+      Gen.choose(0, Long.MaxValue).map(value => D.embed(GDate[D](new java.util.Date(value))))
+
+    case DoubleF() =>
+      Gen.choose(Double.MinValue, Double.MaxValue).map(value => D.embed(GDouble[D](value)))
+
+    case FloatF() =>
+      Gen.choose(Float.MinValue, Float.MaxValue).map(value => D.embed(GFloat[D](value)))
+
+    case IntegerF() =>
+      Gen.choose(Int.MinValue, Int.MaxValue).map(value => D.embed(GInteger[D](value)))
+
+    case LongF() =>
+      Gen.choose(Long.MinValue, Long.MaxValue).map(value => D.embed(GLong[D](value)))
+
+    case StringF() =>
+      Gen.alphaNumStr.map(value => D.embed(GString[D](value)))
+  }
+
+  def genSchemaF[S](implicit S: Birecursive.Aux[S, SchemaF]): Gen[S] =
+    for {
+      depth   <- Gen.choose(1, 1)
+      nbCol   <- Gen.choose(1, 1)
+      columns <- Gen.listOfN(nbCol, genStructF(depth) |> named)
+    } yield S.embed(StructF(ListMap(columns: _*)))
+
+  def named[S](genS: Gen[S]): Gen[(String, S)] =
+    for {
+      name <- Gen.identifier
+      s    <- genS
+    } yield name -> s
+
+  def genValueF[S](implicit S: Corecursive.Aux[S, SchemaF]): Gen[S] =
+    Gen.oneOf(
+      S.embed(BooleanF[S]()),
+      S.embed(DateF[S]()),
+      S.embed(DoubleF[S]()),
+      S.embed(FloatF[S]()),
+      S.embed(IntegerF[S]()),
+      S.embed(LongF[S]()),
+      S.embed(StringF[S]())
+    )
+
+  def genArrayF[S](maxDepth: Int)(implicit S: Corecursive.Aux[S, SchemaF]): Gen[S] =
+    for {
+      depth <- Gen.choose(1, maxDepth)
+      elems <- genNonArrayF(maxDepth - depth)
+    } yield S.embed(ArrayF(elems))
+
+  def genNonArrayF[S](maxDepth: Int)(implicit S: Corecursive.Aux[S, SchemaF]): Gen[S] =
+    if (maxDepth > 0) {
+      Gen.oneOf[S](genValueF, genStructF(maxDepth))
+    } else {
+      genValueF
+    }
+
+  def genStructF[S](maxDepth: Int)(implicit S: Corecursive.Aux[S, SchemaF]): Gen[S] =
+    for {
+      depth    <- Gen.choose(1, maxDepth)
+      nbFields <- Gen.choose(0, 3)
+      fields   <- Gen.listOfN(nbFields, genColumnF(maxDepth - depth))
+    } yield S.embed(StructF(ListMap(fields: _*)))
+
+  def genColumnF[S](maxDepth: Int)(implicit S: Corecursive.Aux[S, SchemaF]): Gen[(String, S)] = {
+    def genValue: Gen[S] =
+      if (maxDepth > 0) {
+        Gen.oneOf[S](genValueF, genStructF(maxDepth))
+      } else {
+        genValueF
+      }
+    for {
+      name <- Gen.identifier
+      v    <- genValue
+    } yield name -> v
+  }
 }

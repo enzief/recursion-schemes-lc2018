@@ -103,10 +103,7 @@ object AvroConverter extends SchemaToAvroAlgebras {
   type DataWithSchema[A] = EnvT[Schema, GData, A]
 
   object DataWithSchema {
-    def apply[W[_]]: EnvW[W] = new EnvW[W]
-    class EnvW[W[_]] {
-      def apply[E, A](run: (E, W[A])): EnvT[E, W, A] = EnvT(run)
-    }
+    def apply[E, A](run: (E, GData[A])): EnvT[E, GData, A] = EnvT(run)
   }
 
   /**
@@ -156,44 +153,44 @@ object AvroConverter extends SchemaToAvroAlgebras {
     case (s, d) =>
       val avro: Schema = schemaFToAvro(s)
       (S.project(s), D.project(d)) match {
-        case (sF @ StructF(fieldsF), GStruct(fields)) =>
+        case (StructF(fieldsF), GStruct(fields)) =>
           val zip: GStruct[(S, D)] =
             GStruct(fields.map {
               case (name, fx) => name -> (fieldsF(name), fx)
             })
-          DataWithSchema[GData](avro -> zip).right
+          DataWithSchema(avro -> zip).right
 
-        case (aF @ ArrayF(elemF), GArray(elems)) =>
+        case (ArrayF(elemF), GArray(elems)) =>
           val zip = GArray(elems.map(elemF -> _))
-          DataWithSchema[GData](avro -> zip).right
+          DataWithSchema(avro -> zip).right
 
-        case (vF @ StringF(), GString(v)) =>
+        case (StringF(), GString(v)) =>
           val zip = GString[(S, D)](v)
-          DataWithSchema[GData](avro -> zip).right
+          DataWithSchema(avro -> zip).right
 
-        case (vF @ IntegerF(), GInteger(v)) =>
+        case (IntegerF(), GInteger(v)) =>
           val zip = GInteger[(S, D)](v)
-          DataWithSchema[GData](avro -> zip).right
+          DataWithSchema(avro -> zip).right
 
-        case (vF @ LongF(), GLong(v)) =>
+        case (LongF(), GLong(v)) =>
           val zip = GLong[(S, D)](v)
-          DataWithSchema[GData](avro -> zip).right
+          DataWithSchema(avro -> zip).right
 
-        case (vF @ BooleanF(), GBoolean(v)) =>
+        case (BooleanF(), GBoolean(v)) =>
           val zip = GBoolean[(S, D)](v)
-          DataWithSchema[GData](avro -> zip).right
+          DataWithSchema(avro -> zip).right
 
-        case (vF @ FloatF(), GFloat(v)) =>
+        case (FloatF(), GFloat(v)) =>
           val zip = GFloat[(S, D)](v)
-          DataWithSchema[GData](avro -> zip).right
+          DataWithSchema(avro -> zip).right
 
-        case (vF @ DoubleF(), GDouble(v)) =>
+        case (DoubleF(), GDouble(v)) =>
           val zip = GDouble[(S, D)](v)
-          DataWithSchema[GData](avro -> zip).right
+          DataWithSchema(avro -> zip).right
 
-        case (vF @ DateF(), GDate(v)) =>
+        case (DateF(), GDate(v)) =>
           val zip = GDate[(S, D)](v)
-          DataWithSchema[GData](avro -> zip).right
+          DataWithSchema(avro -> zip).right
 
         case _ =>
           Incompatibility(avro, d).left

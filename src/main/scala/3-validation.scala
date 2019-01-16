@@ -210,3 +210,28 @@ trait DataWithSchemaGenerator {
     } yield name -> v
   }
 }
+
+trait GDataInstances {
+
+  implicit val genericDataFTraverse: Traverse[GData] = new Traverse[GData] {
+
+    override def traverseImpl[G[_], A, B](
+        fa: GData[A]
+    )(f: A => G[B])(implicit evidence$1: Applicative[G]): G[GData[B]] = fa match {
+      case GArray(elems) =>
+        Functor[G].map(elems.toList traverse f)(GArray.apply)
+
+      case GStruct(fields) =>
+        val (keys, values) = fields.unzip
+        Functor[G].map(values.toList traverse f)(v => GStruct(ListMap((keys zip v).toSeq: _*)))
+
+      case GString(value)  => Applicative[G].point(GString[B](value))
+      case GLong(value)    => Applicative[G].point(GLong[B](value))
+      case GInteger(value) => Applicative[G].point(GInteger[B](value))
+      case GDouble(value)  => Applicative[G].point(GDouble[B](value))
+      case GFloat(value)   => Applicative[G].point(GFloat[B](value))
+      case GDate(value)    => Applicative[G].point(GDate[B](value))
+      case GBoolean(value) => Applicative[G].point(GBoolean[B](value))
+    }
+  }
+}
